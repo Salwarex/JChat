@@ -1,0 +1,50 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'ru.waxera.chat'
+version = '1.0-SNAPSHOT'
+sourceCompatibility = '21'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+}
+
+test {
+}
+
+task serverIo(type: Jar) {
+    archiveBaseName.set('IoChat-server')
+    archiveVersion.set('')
+    destinationDirectory.set(file("$buildDir/libs"))
+
+    from sourceSets.main.output
+
+    include 'ru/waxera/chat/io/server/**'
+
+    manifest {
+        attributes 'Main-Class': 'ru.waxera.chat.io.server.IoServerRunner'
+    }
+}
+
+task clientIo(type: Jar) {
+    archiveBaseName.set('IoChat-client')
+    archiveVersion.set('')
+    destinationDirectory.set(file("$buildDir/libs"))
+
+    from sourceSets.main.output
+
+    include 'ru/waxera/chat/io/client/**'
+
+    manifest {
+        attributes 'Main-Class': 'ru.waxera.chat.io.client.IoClientRunner'
+    }
+}
+
+task IoChat {
+    dependsOn serverIo, clientIo
+}
