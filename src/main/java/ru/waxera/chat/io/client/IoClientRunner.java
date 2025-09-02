@@ -1,14 +1,50 @@
 package ru.waxera.chat.io.client;
 
+import ru.waxera.chat.io.core.command.CommandProcessor;
+import ru.waxera.chat.io.core.command.TypeMismatchException;
+
 import java.util.Scanner;
 
 public class IoClientRunner {
 
     static String nickname = null;
     static ClientConnection connection = null;
+    private static CommandProcessor commandProcessor;
 
     public static void main(String[] args) {
+        setCommandProcessor();
         menu();
+    }
+
+    private static void setCommandProcessor(){
+        commandProcessor = new CommandProcessor();
+        commandProcessor.add("exit", (e) -> {
+            if(e.get("connection") instanceof ClientConnection clientConnection){
+                clientConnection.closeConnection();
+                System.out.println("You have been left from the chat server!");
+            }
+            else{
+                throw new TypeMismatchException("The type of the environment variable \"connection\" does not match the predicate.");
+            }
+        });
+
+        commandProcessor.add("call", (e) -> {
+            if(e.get("connection") instanceof ClientConnection clientConnection){
+                clientConnection.startVoiceMode();
+            }
+            else{
+                throw new TypeMismatchException("The type of the environment variable \"connection\" does not match the predicate.");
+            }
+        });
+
+        commandProcessor.add("bye", (e) -> {
+            if(e.get("connection") instanceof ClientConnection clientConnection){
+                clientConnection.stopVoiceMode();
+            }
+            else{
+                throw new TypeMismatchException("The type of the environment variable \"connection\" does not match the predicate.");
+            }
+        });
     }
 
     static void resetConnection(){
@@ -42,6 +78,10 @@ public class IoClientRunner {
                 connection = new ClientConnection(splitAddress[0], port);
             }
         }
+    }
+
+    public static CommandProcessor getCommandProcessor(){
+        return commandProcessor;
     }
 
     public static String getNickname(){

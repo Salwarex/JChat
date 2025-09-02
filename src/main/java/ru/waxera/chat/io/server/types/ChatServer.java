@@ -1,4 +1,7 @@
-package ru.waxera.chat.io.server;
+package ru.waxera.chat.io.server.types;
+
+import ru.waxera.chat.io.core.command.Environment;
+import ru.waxera.chat.io.server.ServerApplication;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -11,16 +14,15 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-public class IoServer {
+public class ChatServer implements Server, Runnable{
     private final ExecutorService pool;
     private final Set<Socket> connected;
     private final ServerSocket serverSocket;
     private final static DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm:ss dd.MM.yyyy");
 
-    public IoServer(int port){
-        this.pool = Executors.newVirtualThreadPerTaskExecutor();
+    public ChatServer(int port, ExecutorService pool){
+        this.pool = pool;
         this.connected = new HashSet<>();
         try {
             System.out.println("Server is started on " + port);
@@ -31,18 +33,20 @@ public class IoServer {
         }
     }
 
-    public void startAccepting(){
+    @Override
+    public void run(){
         try {
             while (!serverSocket.isClosed()) {
                 Socket socket = serverSocket.accept();
-                pool.submit(() -> handleRequest(socket));
+                pool.submit(() -> handleChat(socket));
             }
         } catch (IOException e) {
             System.err.println("Start accepting: " + e.toString());
         }
     }
 
-    private void stop(){
+    @Override
+    public void stop(){
         try{
             this.serverSocket.close();
         }catch (IOException e){
@@ -50,28 +54,35 @@ public class IoServer {
         }
     }
 
-    private void handleRequest(Socket socket){
-        boolean joinAnnounced = false;
+    private void handleChat(Socket socket){
+        String nickname = "";
         try (socket) {
             DataInputStream in = new DataInputStream(socket.getInputStream());
 
             connected.add(socket);
 
             //init
-            String nickname = in.readUTF();
-            System.out.println(nickname + " connected!");
-            broadcast("server@%s join!".formatted(nickname), null);
+            nickname = in.readUTF();
+            serverMessage("%s join!".formatted(nickname));
             //
 
             while(!socket.isClosed()){
                 String message = in.readUTF();
 
-                System.out.printf("[%s] %s > %s %n", LocalDateTime.now(ZoneId.systemDefault()).format(formatter), nickname, message);
+                System.out.printf("[CLIENT %s] %s > %s %n", LocalDateTime.now(ZoneId.systemDefault()).format(formatter), nickname, message);
 
-                if("exit".equalsIgnoreCase(message)){
-                    System.out.println(nickname + " disconnected!");
-                    broadcast("server@%s left!".formatted(nickname), null);
-                    break;
+                char first = message.charAt(0);
+                if(first == '/'){
+                    String commandKey = message.substring(1);
+
+                    Environment environment = new Environment();
+                    environment.add("server", this);
+                    environment.add("nickname", nickname);
+
+                    boolean interrupt = ServerApplication.getCommandProcessor().executeInterrupt(commandKey, environment);
+
+                    if(interrupt) break;
+                    else continue;
                 }
 
                 broadcast(nickname + "@" + message, socket);
@@ -80,11 +91,18 @@ public class IoServer {
             System.err.println("Handle request exception: " + e.toString());
         } finally {
             connected.remove(socket);
+            System.out.println(nickname + " disconnected!");
+            broadcast("server@%s left!".formatted(nickname), null);
         }
     }
 
-    private void broadcast(String message, Socket sender){
-        List<Socket> toRemove = new ArrayList<>();
+    public void serverMessage(String message){
+        System.out.printf("[SERVER %s] %s %n", LocalDateTime.now(ZoneId.systemDefault()).format(formatter), message);
+        this.broadcast("server@" + message, null);
+    }
+
+    private synchronized void broadcast(String message, Socket sender){
+        Set<Socket> toRemove = new HashSet<>();
         for(Socket socket: this.connected){
             if(socket.isClosed()) {
                 toRemove.add(socket);
@@ -98,8 +116,6 @@ public class IoServer {
                 System.err.println("Broadcast exception: " + e.toString());
             }
         }
-        for(Socket socket : toRemove){
-            connected.remove(socket);
-        }
+        connected.removeAll(toRemove);
     }
 }

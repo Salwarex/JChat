@@ -1,5 +1,10 @@
 package ru.waxera.chat.io.client;
 
+import ru.waxera.chat.io.client.sound.ApplicationAudioFormat;
+import ru.waxera.chat.io.client.sound.SoundReader;
+import ru.waxera.chat.io.client.sound.SoundReceiver;
+import ru.waxera.chat.io.core.command.Environment;
+
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -13,12 +18,19 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ClientConnection {
+    private final String address;
+    private final int port;
     private Socket socket;
-    private ExecutorService pool = Executors.newFixedThreadPool(2);
+    private ExecutorService pool = Executors.newFixedThreadPool(3);
     private volatile boolean isClosed = false;
     private final static DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private SoundReader reader = null;
+    private SoundReceiver receiver = null;
+    private boolean voiceMode = false;
 
     public ClientConnection(String address, int port) {
+        this.address = address;
+        this.port = port;
         try{
             socket = new Socket(address, port);
             pool.submit(this::handleSubmit);
@@ -37,10 +49,23 @@ public class ClientConnection {
 
             while(true){
                 String message = scanner.nextLine();
-                out.writeUTF(message);
-                if(message.equalsIgnoreCase("exit")){
-                    closeConnection();
-                    break;
+
+                char first = message.charAt(0);
+                if(!voiceMode){
+                    out.writeUTF(message);
+                }
+                else {
+                    if(first != '/') {
+                        System.out.println("[VOICE ROOM] You can't send default messages in the voice room!");
+                        continue;
+                    }
+                }
+
+                if(first == '/'){
+                    String commandKey = message.substring(1);
+                    Environment environment = new Environment();
+                    environment.add("connection", this);
+                    IoClientRunner.getCommandProcessor().execute(commandKey, environment);
                 }
             }
         }
@@ -51,7 +76,32 @@ public class ClientConnection {
         }
     }
 
-    public void closeConnection(){
+    void stopVoiceMode() {
+        if(voiceMode){
+            reader.stop();
+            receiver.stop();
+            voiceMode = false;
+        }
+        else{
+            System.out.println("[VOICE ROOM] You are not in the voice room!");
+        }
+    }
+
+    void startVoiceMode() {
+        if(!voiceMode){
+            reader = new SoundReader(ApplicationAudioFormat.getInstance(), address, port);
+            receiver = new SoundReceiver(ApplicationAudioFormat.getInstance(), 41456);
+            pool.submit(reader);
+            pool.submit(receiver);
+            voiceMode = true;
+        }
+        else{
+            System.out.println("[VOICE ROOM] You are already in the voice room!");
+        }
+
+    }
+
+    void closeConnection(){
         if (isClosed) return;
         isClosed = true;
 
@@ -69,7 +119,7 @@ public class ClientConnection {
     private void handleAnswers(){
         try(DataInputStream in = new DataInputStream(socket.getInputStream());){
             while(true){
-                if(socket.isClosed()) break;
+                if(socket.isClosed()) { System.err.println("socket is closed!"); break; }
                 String unformattedMessage = in.readUTF();
                 String[] msgArr = unformattedMessage.split("@");
                 if(msgArr.length != 2) continue;
@@ -84,8 +134,8 @@ public class ClientConnection {
                 else{
                     System.out.printf("[%s] %s > %s %n", time, nickname, message);
                 }
-
             }
+            System.err.println("EOFE");
         }
         catch(SocketException ignored) {}
         catch (IOException e) {
